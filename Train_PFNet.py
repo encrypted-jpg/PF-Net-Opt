@@ -20,6 +20,8 @@ from dfaustDataset import DFaustDataset
 from torch.utils.data import DataLoader
 import numpy as np
 import open3d as o3d
+import time
+from visual import plot_pcd_one_view
 
 
 
@@ -66,8 +68,8 @@ def dataLoaders(opt):
     json = opt.json
     batch_size = opt.batchSize
     gt_points = opt.pnum
-    trainDataset = DFaustDataset(folder, json, partition="train", gt_points=gt_points)
-    testDataset = DFaustDataset(folder, json, partition="test", gt_points=gt_points)
+    trainDataset = DFaustDataset(folder, json, partition="train", gt_num_points=gt_points)
+    testDataset = DFaustDataset(folder, json, partition="test", gt_num_points=gt_points)
     # valDataset = DFaustDataset(folder, json, partition="val")
     trainLoader = DataLoader(trainDataset, batch_size=batch_size, shuffle=True)
     testLoader = DataLoader(testDataset, batch_size=batch_size, shuffle=True)
@@ -118,6 +120,8 @@ torch.manual_seed(opt.manualSeed)
 if opt.cuda:
     torch.cuda.manual_seed_all(opt.manualSeed)
 
+if not os.path.exists(opt.save_dir):
+    os.makedirs(opt.save_dir)
 
 transforms = transforms.Compose(
     [
@@ -135,7 +139,7 @@ transforms = transforms.Compose(
 # test_dataloader = torch.utils.data.DataLoader(test_dset, batch_size=opt.batchSize,
 #                                          shuffle=True,num_workers = int(opt.workers))
 
-dataloader, test_dataloader, dset, test_dset = dataLoaders()
+dataloader, test_dataloader, dset, test_dset = dataLoaders(opt)
 
 #dset = ModelNet40Loader.ModelNet40Cls(opt.pnum, train=True, transforms=transforms, download = False)
 #assert dset
@@ -175,19 +179,21 @@ num_batch = len(dset) / opt.batchSize
 #  G-NET and T-NET
 ##########################  
 if opt.D_choose == 1:
+    best_loss = 1000000
     for epoch in range(resume_epoch,opt.niter):
-        if epoch<30:
+        if epoch<15:
             alpha1 = 0.01
             alpha2 = 0.02
-        elif epoch<80:
+        elif epoch<20:
             alpha1 = 0.05
             alpha2 = 0.1
         else:
             alpha1 = 0.1
             alpha2 = 0.2
         
+        train_loss = 0.0
         for i, data in enumerate(dataloader, 0):
-            
+            start = time.time()
             real_point, target = data
             # Float32
             real_point = real_point.float()
@@ -282,81 +288,114 @@ if opt.D_choose == 1:
             +alpha2*criterion_PointLoss(fake_center2,real_center_key2)
             
             errG = (1-opt.wtl2) * errG_D + opt.wtl2 * errG_l2
+            train_loss += errG.item()
             errG.backward()
             optimizerG.step()
-            print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f / %.4f / %.4f/ %.4f'
+            end = time.time()
+            b_time = end - start
+            print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f / %.4f / %.4f/ %.4f, batch time: %.4f'
                   % (epoch, opt.niter, i, len(dataloader),  
-                     errD.data, errG_D.data,errG_l2,errG,CD_LOSS))
-            f=open('loss_PFNet.txt','a')
-            f.write('\n'+'[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f / %.4f / %.4f /%.4f'
+                     errD.data, errG_D.data,errG_l2,errG,CD_LOSS,b_time))
+            f=open(os.path.join(opt.save_dir, 'loss_PFNet.txt'),'a')
+            f.write('\n'+'[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f / %.4f / %.4f /%.4f, batch time: %.4f'
                   % (epoch, opt.niter, i, len(dataloader), 
-                     errD.data, errG_D.data,errG_l2,errG,CD_LOSS))
+                     errD.data, errG_D.data,errG_l2,errG,CD_LOSS, b_time))
+
+            if i % 20 == 0:
+                if not os.path.exists(os.path.join(opt.save_dir, 'pcds')):
+                    os.makedirs(os.path.join(opt.save_dir, 'pcds'))
+                if not os.path.exists(os.path.join(opt.save_dir, 'imgs')):
+                    os.makedirs(os.path.join(opt.save_dir, 'imgs'))
+                save_pcd(real_center[0].cpu().detach().numpy().reshape(-1, 3), '{}/train_{}_{}_real.pcd'.format(os.path.join(opt.save_dir, 'temp'), epoch, i))
+                save_pcd(fake[0].cpu().detach().numpy().reshape(-1, 3), '{}/train_{}_{}_fake.pcd'.format(os.path.join(opt.save_dir, 'temp'), epoch, i))
+                plot_pcd_one_view(os.path.join(opt.save_dir, 'imgs', 'train_{}_{}.png'.format(epoch, i)),
+                                    [real_center[0].cpu().detach().numpy().reshape(-1, 3), fake[0].cpu().detach().numpy().reshape(-1, 3)],
+                                    ['real', 'fake'], xlim=[-1, 1], ylim=[-1, 1], zlim=[-1, 1])
+
+
+        start = time.time()
+        test_loss = 0.0
+        rid = np.random.randint(0, len(test_dset))
+        for i, data in enumerate(test_dataloader, 0):
+            real_point, target = data
             
+            real_point = real_point.float()
+            batch_size = real_point.size()[0]
+            real_center = torch.FloatTensor(batch_size, 1, opt.crop_point_num, 3)
+            input_cropped1 = torch.FloatTensor(batch_size, opt.pnum, 3)
+            input_cropped1 = input_cropped1.data.copy_(real_point)
+            real_point = torch.unsqueeze(real_point, 1)
+            input_cropped1 = torch.unsqueeze(input_cropped1,1)
             
-            if i % 100 == 0:
-                print('After, ',i,'-th batch')
-                f.write('\n'+'After, '+str(i)+'-th batch')
-                rid = np.random.randint(0, len(test_dset))
-                for i, data in enumerate(test_dataloader, 0):
-                    real_point, target = data
-                    
-                    real_point = real_point.float()
-                    batch_size = real_point.size()[0]
-                    real_center = torch.FloatTensor(batch_size, 1, opt.crop_point_num, 3)
-                    input_cropped1 = torch.FloatTensor(batch_size, opt.pnum, 3)
-                    input_cropped1 = input_cropped1.data.copy_(real_point)
-                    real_point = torch.unsqueeze(real_point, 1)
-                    input_cropped1 = torch.unsqueeze(input_cropped1,1)
-                    
-                    p_origin = [0,0,0]
-                    
-                    if opt.cropmethod == 'random_center':
-                        choice = [torch.Tensor([1,0,0]),torch.Tensor([0,0,1]),torch.Tensor([1,0,1]),torch.Tensor([-1,0,0]),torch.Tensor([-1,1,0])]
-                        
-                        for m in range(batch_size):
-                            index = random.sample(choice,1)
-                            distance_list = []
-                            p_center = index[0]
-                            for n in range(opt.pnum):
-                                distance_list.append(distance_squre(real_point[m,0,n],p_center))
-                            distance_order = sorted(enumerate(distance_list), key  = lambda x:x[1])                         
-                            for sp in range(opt.crop_point_num):
-                                input_cropped1.data[m,0,distance_order[sp][0]] = torch.FloatTensor([0,0,0])
-                                real_center.data[m,0,sp] = real_point[m,0,distance_order[sp][0]]  
-                    real_center = real_center.to(device)
-                    real_center = torch.squeeze(real_center,1)
-                    input_cropped1 = input_cropped1.to(device) 
-                    input_cropped1 = torch.squeeze(input_cropped1,1)
-                    input_cropped2_idx = utils.farthest_point_sample(input_cropped1,opt.point_scales_list[1],RAN = True)
-                    input_cropped2     = utils.index_points(input_cropped1,input_cropped2_idx)
-                    input_cropped3_idx = utils.farthest_point_sample(input_cropped1,opt.point_scales_list[2],RAN = False)
-                    input_cropped3     = utils.index_points(input_cropped1,input_cropped3_idx)
-                    input_cropped1 = Variable(input_cropped1,requires_grad=False)
-                    input_cropped2 = Variable(input_cropped2,requires_grad=False)
-                    input_cropped3 = Variable(input_cropped3,requires_grad=False)
-                    input_cropped2 = input_cropped2.to(device)
-                    input_cropped3 = input_cropped3.to(device)      
-                    input_cropped  = [input_cropped1,input_cropped2,input_cropped3]
-                    point_netG.eval()
-                    fake_center1,fake_center2,fake  =point_netG(input_cropped)
-                    if rid == i:
-                        os.mkdir(os.path.join(opt.save_dir, 'temp'), exist_ok=True)
-                        save_pcd(real_center[0].cpu().detach().numpy().reshape(-1, 3), '{}/{}_real.pcd'.format(os.path.join(opt.save_dir, 'temp'),i))
-                        save_pcd(fake[0].cpu().detach().numpy().reshape(-1, 3), '{}/{}_fake.pcd'.format(os.path.join(opt.save_dir, 'temp'),i))
-                    CD_loss = criterion_PointLoss(torch.squeeze(fake,1),torch.squeeze(real_center,1))
-                    print('test result:',CD_loss)
-                    f.write('\n'+'test result:  %.4f'%(CD_loss))
-                    break
-            f.close()
+            p_origin = [0,0,0]
+            
+            if opt.cropmethod == 'random_center':
+                choice = [torch.Tensor([1,0,0]),torch.Tensor([0,0,1]),torch.Tensor([1,0,1]),torch.Tensor([-1,0,0]),torch.Tensor([-1,1,0])]
+                
+                for m in range(batch_size):
+                    index = random.sample(choice,1)
+                    distance_list = []
+                    p_center = index[0]
+                    for n in range(opt.pnum):
+                        distance_list.append(distance_squre(real_point[m,0,n],p_center))
+                    distance_order = sorted(enumerate(distance_list), key  = lambda x:x[1])                         
+                    for sp in range(opt.crop_point_num):
+                        input_cropped1.data[m,0,distance_order[sp][0]] = torch.FloatTensor([0,0,0])
+                        real_center.data[m,0,sp] = real_point[m,0,distance_order[sp][0]]  
+            real_center = real_center.to(device)
+            real_center = torch.squeeze(real_center,1)
+            input_cropped1 = input_cropped1.to(device) 
+            input_cropped1 = torch.squeeze(input_cropped1,1)
+            input_cropped2_idx = utils.farthest_point_sample(input_cropped1,opt.point_scales_list[1],RAN = True)
+            input_cropped2     = utils.index_points(input_cropped1,input_cropped2_idx)
+            input_cropped3_idx = utils.farthest_point_sample(input_cropped1,opt.point_scales_list[2],RAN = False)
+            input_cropped3     = utils.index_points(input_cropped1,input_cropped3_idx)
+            input_cropped1 = Variable(input_cropped1,requires_grad=False)
+            input_cropped2 = Variable(input_cropped2,requires_grad=False)
+            input_cropped3 = Variable(input_cropped3,requires_grad=False)
+            input_cropped2 = input_cropped2.to(device)
+            input_cropped3 = input_cropped3.to(device)      
+            input_cropped  = [input_cropped1,input_cropped2,input_cropped3]
+            point_netG.eval()
+            fake_center1,fake_center2,fake  =point_netG(input_cropped)
+            if rid == i:
+                if not os.path.exists(os.path.join(opt.save_dir, 'temp')):
+                    os.makedirs(os.path.join(opt.save_dir, 'temp'))
+                if not os.path.exists(os.path.join(opt.save_dir, 'imgs')):
+                    os.makedirs(os.path.join(opt.save_dir, 'imgs'))
+                save_pcd(real_center[0].cpu().detach().numpy().reshape(-1, 3), '{}/test_{}_real.pcd'.format(os.path.join(opt.save_dir, 'temp'),epoch))
+                save_pcd(fake[0].cpu().detach().numpy().reshape(-1, 3), '{}/test_{}_fake.pcd'.format(os.path.join(opt.save_dir, 'temp'),epoch))
+                plot_pcd_one_view(os.path.join(opt.save_dir, 'imgs', 'test_{}.png'.format(epoch)),
+                                    [real_center[0].cpu().detach().numpy().reshape(-1, 3), fake[0].cpu().detach().numpy().reshape(-1, 3)],
+                                    ['real', 'fake'], xlim=[-1, 1], ylim=[-1, 1], zlim=[-1, 1])
+            CD_loss = criterion_PointLoss(torch.squeeze(fake,1),torch.squeeze(real_center,1))
+            test_loss += CD_loss.item()
+        
+        end = time.time()
+        train_loss /= len(dataloader)
+        test_loss /= len(test_dataloader)
+        print('Epoch: %d, test loss: %.4f, Time: %.4f' % (epoch, test_loss,end-start))
+        f.write('\n'+'Epoch: %d, test loss: %.4f, Time: %.4f' % (epoch, test_loss,end-start))
+        
+        f.close()
         schedulerD.step()
         schedulerG.step()
         # os.mkdir(opt.save_dir, exist_ok=True)
+        print('Epoch: %d, train loss: %.4f' % (epoch, train_loss))
         torch.save({'epoch':epoch+1,
-                    'state_dict':point_netG.state_dict()},
-                    os.path.join(opt.save_dir, 'point_netG')+str(epoch)+'.pth' )
+                        'state_dict':point_netG.state_dict()},
+                        os.path.join(opt.save_dir, 'point_netG_last.pth' ))
         torch.save({'epoch':epoch+1,
                     'state_dict':point_netD.state_dict()},
-                    os.path.join(opt.save_dir, 'point_netD')+str(epoch)+'.pth' )  
+                    os.path.join(opt.save_dir, 'point_netD_last.pth' ))
+        if test_loss < best_loss:
+            best_loss = test_loss
+            torch.save({'epoch':epoch+1,
+                        'state_dict':point_netG.state_dict()},
+                        os.path.join(opt.save_dir, 'point_netG_best.pth' ))
+            torch.save({'epoch':epoch+1,
+                        'state_dict':point_netD.state_dict()},
+                        os.path.join(opt.save_dir, 'point_netD_best.pth' ))
 
 #
 #############################
