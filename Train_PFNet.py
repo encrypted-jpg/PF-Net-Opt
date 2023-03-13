@@ -24,7 +24,7 @@ import open3d as o3d
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataroot',  default='dataset/train', help='path to dataset')
+parser.add_argument('--dataroot',  default="C:/Users/valla/Desktop/BTP/BTP2/", help='path to dataset')
 parser.add_argument('--workers', type=int,default=2, help='number of data loading workers')
 parser.add_argument('--batchSize', type=int, default=24, help='input batch size')
 parser.add_argument('--pnum', type=int, default=2048, help='the point number of a sample')
@@ -46,6 +46,7 @@ parser.add_argument('--point_scales_list',type=list,default=[6144,1024,512],help
 parser.add_argument('--each_scales_size',type=int,default=1,help='each scales size')
 parser.add_argument('--wtl2',type=float,default=0.95,help='0 means do not use else use with this weight')
 parser.add_argument('--cropmethod', default = 'random_center', help = 'random|center|random_center')
+parser.add_argument('--save_dir', default = 'checkpoints', help = 'save directory')
 opt = parser.parse_args()
 print(opt)
 
@@ -130,7 +131,7 @@ transforms = transforms.Compose(
 # test_dataloader = torch.utils.data.DataLoader(test_dset, batch_size=opt.batchSize,
 #                                          shuffle=True,num_workers = int(opt.workers))
 
-dataloader, test_dataloader, dset, test_dset = dataLoaders("C:/Users/valla/Desktop/BTP/BTP2/", "data_subset.json", batch_size=4)
+dataloader, test_dataloader, dset, test_dset = dataLoaders(opt.dataroot, "data_subset.json", batch_size=opt.batchSize)
 
 #dset = ModelNet40Loader.ModelNet40Cls(opt.pnum, train=True, transforms=transforms, download = False)
 #assert dset
@@ -270,8 +271,6 @@ if opt.D_choose == 1:
             errG_D = criterion(output, label)
             errG_l2 = 0
             # print(real_center.shape, fake.shape)
-            save_pcd(real_center[0].cpu().detach().numpy().reshape(-1, 3), 'temp/{}_real.pcd'.format(i))
-            save_pcd(fake[0].cpu().detach().numpy().reshape(-1, 3), 'temp/{}_fake.pcd'.format(i))
             CD_LOSS = criterion_PointLoss(torch.squeeze(fake,1),torch.squeeze(real_center,1))
        
             errG_l2 = criterion_PointLoss(torch.squeeze(fake,1),torch.squeeze(real_center,1))\
@@ -290,9 +289,10 @@ if opt.D_choose == 1:
                      errD.data, errG_D.data,errG_l2,errG,CD_LOSS))
             
             
-            if i % 10 ==0:
+            if i % 100 == 0:
                 print('After, ',i,'-th batch')
                 f.write('\n'+'After, '+str(i)+'-th batch')
+                rid = np.random.randint(0, len(test_dset))
                 for i, data in enumerate(test_dataloader, 0):
                     real_point, target = data
                     
@@ -335,6 +335,10 @@ if opt.D_choose == 1:
                     input_cropped  = [input_cropped1,input_cropped2,input_cropped3]
                     point_netG.eval()
                     fake_center1,fake_center2,fake  =point_netG(input_cropped)
+                    if rid == i:
+                        os.mkdir(os.path.join(opt.save_dir, 'temp'), exist_ok=True)
+                        save_pcd(real_center[0].cpu().detach().numpy().reshape(-1, 3), '{}/{}_real.pcd'.format(os.path.join(opt.save_dir, 'temp'),i))
+                        save_pcd(fake[0].cpu().detach().numpy().reshape(-1, 3), '{}/{}_fake.pcd'.format(os.path.join(opt.save_dir, 'temp'),i))
                     CD_loss = criterion_PointLoss(torch.squeeze(fake,1),torch.squeeze(real_center,1))
                     print('test result:',CD_loss)
                     f.write('\n'+'test result:  %.4f'%(CD_loss))
@@ -342,14 +346,13 @@ if opt.D_choose == 1:
             f.close()
         schedulerD.step()
         schedulerG.step()
-        if epoch% 10 == 0:
-            os.mkdir('Trained_Model', exist_ok=True)
-            torch.save({'epoch':epoch+1,
-                        'state_dict':point_netG.state_dict()},
-                        'Trained_Model/point_netG'+str(epoch)+'.pth' )
-            torch.save({'epoch':epoch+1,
-                        'state_dict':point_netD.state_dict()},
-                        'Trained_Model/point_netD'+str(epoch)+'.pth' )  
+        # os.mkdir(opt.save_dir, exist_ok=True)
+        torch.save({'epoch':epoch+1,
+                    'state_dict':point_netG.state_dict()},
+                    os.path.join(opt.save_dir, 'point_netG')+str(epoch)+'.pth' )
+        torch.save({'epoch':epoch+1,
+                    'state_dict':point_netD.state_dict()},
+                    os.path.join(opt.save_dir, 'point_netD')+str(epoch)+'.pth' )  
 
 #
 #############################
@@ -438,7 +441,7 @@ else:
             print('[%d/%d][%d/%d] Loss_G: %.4f / %.4f '
                   % (epoch, opt.niter, i, len(dataloader), 
                       errG_l2,CD_LOSS))
-            f=open('loss_PFNet.txt','a')
+            f=open(os.path.join(opt.save_dir, 'loss_PFNet.txt'),'a')
             f.write('\n'+'[%d/%d][%d/%d] Loss_G: %.4f / %.4f '
                   % (epoch, opt.niter, i, len(dataloader), 
                       errG_l2,CD_LOSS))
