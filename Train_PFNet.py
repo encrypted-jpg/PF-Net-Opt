@@ -28,7 +28,7 @@ parser.add_argument('--dataroot',  default="C:/Users/valla/Desktop/BTP/BTP2/", h
 parser.add_argument('--json', default="data.json", help='path to json file')
 parser.add_argument('--workers', type=int,default=2, help='number of data loading workers')
 parser.add_argument('--batchSize', type=int, default=24, help='input batch size')
-parser.add_argument('--pnum', type=int, default=2048, help='the point number of a sample')
+parser.add_argument('--pnum', type=int, default=6144, help='the point number of a sample')
 parser.add_argument('--crop_point_num',type=int,default=6144,help='0 means do not use else use with this weight')
 parser.add_argument('--nc', type=int, default=3)
 parser.add_argument('--niter', type=int, default=201, help='number of epochs to train for')
@@ -60,11 +60,14 @@ point_netD = _netlocalD(opt.crop_point_num)
 cudnn.benchmark = True
 resume_epoch=0
 
-def dataLoaders(folder, json, batch_size):
+def dataLoaders(opt):
     print("[+] Loading the data...")
-
-    trainDataset = DFaustDataset(folder, json, partition="train")
-    testDataset = DFaustDataset(folder, json, partition="test")
+    folder = opt.dataroot
+    json = opt.json
+    batch_size = opt.batchSize
+    gt_points = opt.pnum
+    trainDataset = DFaustDataset(folder, json, partition="train", gt_points=gt_points)
+    testDataset = DFaustDataset(folder, json, partition="test", gt_points=gt_points)
     # valDataset = DFaustDataset(folder, json, partition="val")
     trainLoader = DataLoader(trainDataset, batch_size=batch_size, shuffle=True)
     testLoader = DataLoader(testDataset, batch_size=batch_size, shuffle=True)
@@ -132,7 +135,7 @@ transforms = transforms.Compose(
 # test_dataloader = torch.utils.data.DataLoader(test_dset, batch_size=opt.batchSize,
 #                                          shuffle=True,num_workers = int(opt.workers))
 
-dataloader, test_dataloader, dset, test_dset = dataLoaders(opt.dataroot, opt.json, batch_size=opt.batchSize)
+dataloader, test_dataloader, dset, test_dset = dataLoaders()
 
 #dset = ModelNet40Loader.ModelNet40Cls(opt.pnum, train=True, transforms=transforms, download = False)
 #assert dset
