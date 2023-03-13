@@ -1,0 +1,12 @@
+torch
+open3d-python
+open3d
+numpy
+argparse
+matplotlib
+timm
+tqdm
+Ninja
+tensorboardX
+h5py
+pycpd

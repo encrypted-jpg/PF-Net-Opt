@@ -25,6 +25,7 @@ import open3d as o3d
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataroot',  default="C:/Users/valla/Desktop/BTP/BTP2/", help='path to dataset')
+parser.add_argument('--json', default="data.json", help='path to json file')
 parser.add_argument('--workers', type=int,default=2, help='number of data loading workers')
 parser.add_argument('--batchSize', type=int, default=24, help='input batch size')
 parser.add_argument('--pnum', type=int, default=2048, help='the point number of a sample')
@@ -131,7 +132,7 @@ transforms = transforms.Compose(
 # test_dataloader = torch.utils.data.DataLoader(test_dset, batch_size=opt.batchSize,
 #                                          shuffle=True,num_workers = int(opt.workers))
 
-dataloader, test_dataloader, dset, test_dset = dataLoaders(opt.dataroot, "data_subset.json", batch_size=opt.batchSize)
+dataloader, test_dataloader, dset, test_dset = dataLoaders(opt.dataroot, opt.json, batch_size=opt.batchSize)
 
 #dset = ModelNet40Loader.ModelNet40Cls(opt.pnum, train=True, transforms=transforms, download = False)
 #assert dset
