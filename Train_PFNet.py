@@ -105,12 +105,26 @@ if USE_CUDA:
     point_netG.apply(weights_init_normal)
     point_netD.to(device)
     point_netD.apply(weights_init_normal)
+
 if opt.netG != '' :
-    point_netG.load_state_dict(torch.load(opt.netG,map_location=lambda storage, location: storage)['state_dict'])
-    resume_epoch = torch.load(opt.netG)['epoch']
+    checkpoint = torch.load(opt.netG,map_location=lambda storage, location: storage)
+    point_netG.load_state_dict(checkpoint['state_dict'])
+    resume_epoch = checkpoint['epoch']
+    if 'loss' in checkpoint.keys():
+        loss = checkpoint['loss']
+    else:
+        loss = None
+    print("Loaded netG Model from epoch {} with loss {}".format(resume_epoch, loss))
+
 if opt.netD != '' :
-    point_netD.load_state_dict(torch.load(opt.netD,map_location=lambda storage, location: storage)['state_dict'])
-    resume_epoch = torch.load(opt.netD)['epoch']
+    checkpoint = torch.load(opt.netD,map_location=lambda storage, location: storage)
+    point_netD.load_state_dict(checkpoint['state_dict'])
+    resume_epoch = checkpoint['epoch']
+    if 'loss' in checkpoint.keys():
+        loss = checkpoint['loss']
+    else:
+        loss = None
+    print("Loaded netD Model from epoch {} with loss {}".format(resume_epoch, loss))
 
 if opt.manualSeed is None:
     opt.manualSeed = random.randint(1, 10000)
@@ -306,12 +320,14 @@ if opt.D_choose == 1:
                     os.makedirs(os.path.join(opt.save_dir, 'pcds'))
                 if not os.path.exists(os.path.join(opt.save_dir, 'imgs')):
                     os.makedirs(os.path.join(opt.save_dir, 'imgs'))
-                save_pcd(real_center[0].cpu().detach().numpy().reshape(-1, 3), '{}/train_{}_{}_real.pcd'.format(os.path.join(opt.save_dir, 'temp'), epoch, i))
+                save_pcd(real_center[0].cpu().detach().numpy().reshape(-1, 3), '{}/train_{}_{}_real.pcd'.format(os.path.join(opt.save_dir, 'pcds'), epoch, i))
                 save_pcd(fake[0].cpu().detach().numpy().reshape(-1, 3), '{}/train_{}_{}_fake.pcd'.format(os.path.join(opt.save_dir, 'temp'), epoch, i))
                 plot_pcd_one_view(os.path.join(opt.save_dir, 'imgs', 'train_{}_{}.png'.format(epoch, i)),
                                     [real_center[0].cpu().detach().numpy().reshape(-1, 3), fake[0].cpu().detach().numpy().reshape(-1, 3)],
                                     ['real', 'fake'], xlim=[-1, 1], ylim=[-1, 1], zlim=[-1, 1])
 
+        train_loss /= len(dataloader)
+        print('Epoch: %d, train loss: %.4f' % (epoch, train_loss))
 
         start = time.time()
         test_loss = 0.0
@@ -359,11 +375,11 @@ if opt.D_choose == 1:
             point_netG.eval()
             fake_center1,fake_center2,fake  =point_netG(input_cropped)
             if rid == i:
-                if not os.path.exists(os.path.join(opt.save_dir, 'temp')):
-                    os.makedirs(os.path.join(opt.save_dir, 'temp'))
+                if not os.path.exists(os.path.join(opt.save_dir, 'pcds')):
+                    os.makedirs(os.path.join(opt.save_dir, 'pcds'))
                 if not os.path.exists(os.path.join(opt.save_dir, 'imgs')):
                     os.makedirs(os.path.join(opt.save_dir, 'imgs'))
-                save_pcd(real_center[0].cpu().detach().numpy().reshape(-1, 3), '{}/test_{}_real.pcd'.format(os.path.join(opt.save_dir, 'temp'),epoch))
+                save_pcd(real_center[0].cpu().detach().numpy().reshape(-1, 3), '{}/test_{}_real.pcd'.format(os.path.join(opt.save_dir, 'pcds'),epoch))
                 save_pcd(fake[0].cpu().detach().numpy().reshape(-1, 3), '{}/test_{}_fake.pcd'.format(os.path.join(opt.save_dir, 'temp'),epoch))
                 plot_pcd_one_view(os.path.join(opt.save_dir, 'imgs', 'test_{}.png'.format(epoch)),
                                     [real_center[0].cpu().detach().numpy().reshape(-1, 3), fake[0].cpu().detach().numpy().reshape(-1, 3)],
@@ -372,7 +388,6 @@ if opt.D_choose == 1:
             test_loss += CD_loss.item()
         
         end = time.time()
-        train_loss /= len(dataloader)
         test_loss /= len(test_dataloader)
         print('Epoch: %d, test loss: %.4f, Time: %.4f' % (epoch, test_loss,end-start))
         f.write('\n'+'Epoch: %d, test loss: %.4f, Time: %.4f' % (epoch, test_loss,end-start))
@@ -381,13 +396,13 @@ if opt.D_choose == 1:
         schedulerD.step()
         schedulerG.step()
         # os.mkdir(opt.save_dir, exist_ok=True)
-        print('Epoch: %d, train loss: %.4f' % (epoch, train_loss))
         torch.save({'epoch':epoch+1,
                         'state_dict':point_netG.state_dict()},
                         os.path.join(opt.save_dir, 'point_netG_last.pth' ))
         torch.save({'epoch':epoch+1,
                     'state_dict':point_netD.state_dict()},
                     os.path.join(opt.save_dir, 'point_netD_last.pth' ))
+        print('Saved Last Model')
         if test_loss < best_loss:
             best_loss = test_loss
             torch.save({'epoch':epoch+1,
@@ -396,6 +411,7 @@ if opt.D_choose == 1:
             torch.save({'epoch':epoch+1,
                         'state_dict':point_netD.state_dict()},
                         os.path.join(opt.save_dir, 'point_netD_best.pth' ))
+            print('Saved Best Model')
 
 #
 #############################
