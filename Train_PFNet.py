@@ -172,7 +172,7 @@ print(point_netD)
 print("[+] Total Number of Parameters: {}".format(count_parameters(point_netD)))
 
 criterion = torch.nn.BCEWithLogitsLoss().to(device)
-criterion_PointLoss = ChamferDistanceL1().to(device)
+chamfer_loss = ChamferDistanceL1().to(device)
 
 # setup optimizer
 optimizerD = torch.optim.Adam(point_netD.parameters(), lr=0.0001,betas=(0.9, 0.999),eps=1e-05,weight_decay=opt.weight_decay)
@@ -184,7 +184,7 @@ real_label = 1
 fake_label = 0
 
 crop_point_num = int(opt.crop_point_num)
-input_cropped1 = torch.FloatTensor(opt.batchSize, opt.pnum, 3)
+# input_cropped1 = torch.FloatTensor(opt.batchSize, opt.pnum, 3)
 label = torch.FloatTensor(opt.batchSize)
 
 
@@ -205,7 +205,8 @@ if opt.D_choose == 1:
             alpha1 = 0.1
             alpha2 = 0.2
         
-        train_loss = 0.0
+        trainG_loss = 0.0
+        trainD_loss = 0.0
         for i, data in enumerate(dataloader, 0):
             start = time.time()
             real_point, target = data
@@ -286,6 +287,7 @@ if opt.D_choose == 1:
             errD_fake.backward()
             errD = errD_real + errD_fake
             optimizerD.step()
+            trainD_loss += errD.item()
             ############################
             # (3) Update G network: maximize log(D(G(z)))
             ###########################
@@ -295,14 +297,14 @@ if opt.D_choose == 1:
             errG_D = criterion(output, label)
             errG_l2 = 0
             # print(real_center.shape, fake.shape)
-            CD_LOSS = criterion_PointLoss(torch.squeeze(fake,1),torch.squeeze(real_center,1))
+            CD_LOSS = chamfer_loss(torch.squeeze(fake,1),torch.squeeze(real_center,1))
        
-            errG_l2 = criterion_PointLoss(torch.squeeze(fake,1),torch.squeeze(real_center,1))\
-            +alpha1*criterion_PointLoss(fake_center1,real_center_key1)\
-            +alpha2*criterion_PointLoss(fake_center2,real_center_key2)
+            errG_l2 = chamfer_loss(torch.squeeze(fake,1),torch.squeeze(real_center,1))\
+            +alpha1*chamfer_loss(fake_center1,real_center_key1)\
+            +alpha2*chamfer_loss(fake_center2,real_center_key2)
             
             errG = (1-opt.wtl2) * errG_D + opt.wtl2 * errG_l2
-            train_loss += errG.item()
+            trainG_loss += errG.item()
             errG.backward()
             optimizerG.step()
             end = time.time()
@@ -326,12 +328,13 @@ if opt.D_choose == 1:
                                     [real_center[0].cpu().detach().numpy().reshape(-1, 3), fake[0].cpu().detach().numpy().reshape(-1, 3)],
                                     ['real', 'fake'], xlim=[-1, 1], ylim=[-1, 1], zlim=[-1, 1])
 
-        train_loss /= len(dataloader)
-        print('Epoch: %d, train loss: %.4f' % (epoch, train_loss))
-
+        trainG_loss /= len(dataloader)
+        trainD_loss /= len(dataloader)
+        print('Epoch: %d, trainG_loss: %.4f, trainD_loss: %.4f' % (epoch, trainG_loss, trainD_loss))
+        f.write('\n'+'Epoch: %d, trainG_loss: %.4f, trainD_loss: %.4f' % (epoch, trainG_loss, trainD_loss))
         start = time.time()
         test_loss = 0.0
-        rid = np.random.randint(0, len(test_dset))
+        rid = np.random.randint(0, len(test_dataloader))
         for i, data in enumerate(test_dataloader, 0):
             real_point, target = data
             
@@ -384,7 +387,7 @@ if opt.D_choose == 1:
                 plot_pcd_one_view(os.path.join(opt.save_dir, 'imgs', 'test_{}.png'.format(epoch)),
                                     [real_center[0].cpu().detach().numpy().reshape(-1, 3), fake[0].cpu().detach().numpy().reshape(-1, 3)],
                                     ['real', 'fake'], xlim=[-1, 1], ylim=[-1, 1], zlim=[-1, 1])
-            CD_loss = criterion_PointLoss(torch.squeeze(fake,1),torch.squeeze(real_center,1))
+            CD_loss = chamfer_loss(torch.squeeze(fake,1),torch.squeeze(real_center,1))
             test_loss += CD_loss.item()
         
         end = time.time()
@@ -397,18 +400,22 @@ if opt.D_choose == 1:
         schedulerG.step()
         # os.mkdir(opt.save_dir, exist_ok=True)
         torch.save({'epoch':epoch+1,
-                        'state_dict':point_netG.state_dict()},
-                        os.path.join(opt.save_dir, 'point_netG_last.pth' ))
+                    'loss': test_loss,
+                    'state_dict':point_netG.state_dict()},
+                    os.path.join(opt.save_dir, 'point_netG_last.pth' ))
         torch.save({'epoch':epoch+1,
+                    'loss': test_loss,
                     'state_dict':point_netD.state_dict()},
                     os.path.join(opt.save_dir, 'point_netD_last.pth' ))
         print('Saved Last Model')
         if test_loss < best_loss:
             best_loss = test_loss
             torch.save({'epoch':epoch+1,
+                        'loss': test_loss,
                         'state_dict':point_netG.state_dict()},
                         os.path.join(opt.save_dir, 'point_netG_best.pth' ))
             torch.save({'epoch':epoch+1,
+                        'loss': test_loss,
                         'state_dict':point_netD.state_dict()},
                         os.path.join(opt.save_dir, 'point_netD_best.pth' ))
             print('Saved Best Model')
@@ -489,11 +496,11 @@ else:
             # (3) Update G network: maximize log(D(G(z)))
             ###########################
             
-            CD_LOSS = criterion_PointLoss(torch.squeeze(fake,1),torch.squeeze(real_center,1))
+            CD_LOSS = chamfer_loss(torch.squeeze(fake,1),torch.squeeze(real_center,1))
             
-            errG_l2 = criterion_PointLoss(torch.squeeze(fake,1),torch.squeeze(real_center,1))\
-            +alpha1*criterion_PointLoss(fake_center1,real_center_key1)\
-            +alpha2*criterion_PointLoss(fake_center2,real_center_key2)
+            errG_l2 = chamfer_loss(torch.squeeze(fake,1),torch.squeeze(real_center,1))\
+            +alpha1*chamfer_loss(fake_center1,real_center_key1)\
+            +alpha2*chamfer_loss(fake_center2,real_center_key2)
 
             errG_l2.backward()
             optimizerG.step()
