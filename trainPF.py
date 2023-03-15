@@ -318,10 +318,10 @@ def train_epoch(point_netG, point_netD, trainLoader, epoch, alpha1, alpha2, crit
         +alpha1*chamfer_loss(fake_center1,real_center_key1)\
         +alpha2*chamfer_loss(fake_center2,real_center_key2)
         
-        errG = (1-opt.wtl2) * errG_D + opt.wtl2 * errG_l2
-        trainG_loss += errG.item()
+        errG = (1-opt.wtl2) * errG_D + opt.wtl2 * errG_l2        
         errG.backward()
         optimizerG.step()
+        trainG_loss += errG.item()
         # print_log(f, '[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f / %.4f / %.4f/ %.4f, batch time: %.4f'
         #     % (epoch, opt.niter, i, len(trainLoader),  
         #         errD.data, errG_D.data,errG_l2,errG,CD_LOSS,b_time))
@@ -341,8 +341,8 @@ def train_epoch(point_netG, point_netD, trainLoader, epoch, alpha1, alpha2, crit
 
     trainG_loss /= len(trainLoader)
     trainD_loss /= len(trainLoader)
-    print_log(f, 'Epoch: %d, trainG_loss: %.4f, trainD_loss: %.4f, Time Elapsed: %.4f'
-        % (epoch, trainG_loss, trainD_loss, time.time()-start))
+    print_log(f, 'Epoch: %d, trainD_loss: %.4f, trainG_loss: %.4f, Time Elapsed: %.4f'
+        % (epoch, trainD_loss, trainG_loss, time.time()-start))
     f.close()
     return trainG_loss, trainD_loss
 
