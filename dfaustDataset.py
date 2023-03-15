@@ -42,7 +42,7 @@ class DFaustDataset(Dataset):
         gt_points = gt_points[gtidx]
         # return (points, gt_points), np.array([self.labels[idx]]), os.path.basename(self.partial[idx]).replace(".pcd", "")
         if len(self.cache) < self.cacheLen:
-            self.cache[idx] = gt_points, np.array([self.labels[idx]])
+            self.cache[idx] = gt_points
         # if len(self.cache) % 50 == 0:
         #     print("Cache size: ", len(self.cache))
-        return gt_points, np.array([self.labels[idx]])
+        return gt_points

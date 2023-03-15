@@ -18,12 +18,15 @@ import shapenet_part_loader
 from model_PFNet import _netlocalD,_netG
 from model_PFPCN import _netlocalD,_netG_PCN
 from dfaustDataset import DFaustDataset
+from dfaustPreDataset import DFaustPreDataset
 from torch.utils.data import DataLoader
 import numpy as np
 import open3d as o3d
 import time
 from visual import plot_pcd_one_view
 import datetime
+from tqdm import tqdm
+
 
 def print_log(fd,  message, time=True):
     if time:
@@ -34,7 +37,7 @@ def print_log(fd,  message, time=True):
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataroot',  default="C:/Users/valla/Desktop/BTP/BTP2/", help='path to dataset')
+    parser.add_argument('--dataroot',  default=".", help='path to dataset')
     parser.add_argument('--json', default="data.json", help='path to json file')
     parser.add_argument('--workers', type=int,default=2, help='number of data loading workers')
     parser.add_argument('--batchSize', type=int, default=24, help='input batch size')
@@ -59,6 +62,8 @@ def get_parser():
     parser.add_argument('--wtl2',type=float,default=0.95,help='0 means do not use else use with this weight')
     parser.add_argument('--cropmethod', default = 'random_center', help = 'random|center|random_center')
     parser.add_argument('--save_dir', default = 'checkpoints', help = 'save directory')
+    parser.add_argument('--preprocess', action='store_true', help='preprocess the data')
+    parser.add_argument('--img_freq', type=int, default=100, help='frequency of saving images')
     opt = parser.parse_args()
     return opt
 
@@ -76,9 +81,13 @@ def get_dataLoaders(f, opt):
     json = opt.json
     batch_size = opt.batchSize
     gt_points = opt.pnum
-    trainDataset = DFaustDataset(folder, json, partition="train", gt_num_points=gt_points)
-    testDataset = DFaustDataset(folder, json, partition="test", gt_num_points=gt_points)
-    # valDataset = DFaustDataset(folder, json, partition="val")
+    if opt.preprocess:
+        trainDataset = DFaustDataset(folder, json, opt, partition="train", gt_num_points=gt_points)
+        testDataset = DFaustDataset(folder, json, opt, partition="test", gt_num_points=gt_points)
+        # valDataset = DFaustDataset(folder, json, partition="val")
+    else:
+        trainDataset = DFaustPreDataset(folder, json, opt, partition="train", gt_num_points=gt_points)
+        testDataset = DFaustPreDataset(folder, json, opt, partition="test", gt_num_points=gt_points)
     trainLoader = DataLoader(trainDataset, batch_size=batch_size, shuffle=True)
     testLoader = DataLoader(testDataset, batch_size=batch_size, shuffle=True)
     # valLoader = DataLoader(valDataset, batch_size=batch_size, shuffle=True)
@@ -116,10 +125,10 @@ def load_model(model, path, f):
     print_log(f, "Loaded {} Model with Epoch {} Loss {}".format(path, resume_epoch, loss))
     return model
 
-def pre_ops(opt, f):
+def pre_ops(opt):
     if opt.manualSeed is None:
         opt.manualSeed = random.randint(1, 10000)
-    print_log(f, "Random Seed: " + str(opt.manualSeed))
+    # print_log(f, "Random Seed: " + str(opt.manualSeed))
     random.seed(opt.manualSeed)
     torch.manual_seed(opt.manualSeed)
     if opt.cuda:
@@ -131,7 +140,7 @@ def pre_ops(opt, f):
         os.makedirs(os.path.join(opt.save_dir, 'pcds'))
     if not os.path.exists(os.path.join(opt.save_dir, 'imgs')):
         os.makedirs(os.path.join(opt.save_dir, 'imgs'))
-
+   
 def train(point_netG, point_netD, trainLoader, testLoader, trainDataset, testDataset, opt):
     criterion = torch.nn.BCEWithLogitsLoss().to(device)
     chamfer_loss = ChamferDistanceL1().to(device)
@@ -185,11 +194,13 @@ def train(point_netG, point_netD, trainLoader, testLoader, trainDataset, testDat
                         os.path.join(opt.save_dir, 'point_netD_best.pth' ))
             print_log(f, 'Saved Best Model')
 
-def preprocess(data, label, opt):
+def preprocess(data, opt):
+
+    label = torch.FloatTensor(opt.batchSize)
     real_label = 1
     fake_label = 0
 
-    real_point, target = data
+    real_point = data
     real_point = real_point.float()
 
     batch_size = real_point.size()[0]
@@ -239,8 +250,7 @@ def preprocess(data, label, opt):
     input_cropped3 = Variable(input_cropped3,requires_grad=True)
     input_cropped2 = input_cropped2.to(device)
     input_cropped3 = input_cropped3.to(device)
-    input_cropped  = [input_cropped1,input_cropped2,input_cropped3]
-    return input_cropped1, input_cropped2, input_cropped3, input_cropped, real_center_key1, real_center_key2, real_center, label
+    return input_cropped1, input_cropped2, input_cropped3, real_center_key1, real_center_key2, real_center, label
 
 def train_epoch(point_netG, point_netD, trainLoader, epoch, alpha1, alpha2, criterion, chamfer_loss, optimizerG, optimizerD, opt):
 
@@ -248,7 +258,6 @@ def train_epoch(point_netG, point_netD, trainLoader, epoch, alpha1, alpha2, crit
 
     real_label = 1
     fake_label = 0
-    label = torch.FloatTensor(opt.batchSize)
 
     point_netG.train()
     point_netD.train()
@@ -258,8 +267,22 @@ def train_epoch(point_netG, point_netD, trainLoader, epoch, alpha1, alpha2, crit
     for i, data in enumerate(trainLoader, 0):
         start = time.time()
         
-        input_cropped1, input_cropped2, input_cropped3, input_cropped, real_center_key1, real_center_key2, real_center, label = preprocess(data, label, opt)
+        if opt.preprocess:
+            cdata = preprocess(data)
+        else:
+            cdata = data
+
+        input_cropped1, input_cropped2, input_cropped3, real_center_key1, real_center_key2, real_center, label = cdata
         
+        input_cropped1 = torch.squeeze(input_cropped1).to(device)
+        input_cropped2 = torch.squeeze(input_cropped2).to(device)
+        input_cropped3 = torch.squeeze(input_cropped3).to(device)
+        input_cropped = [input_cropped1,input_cropped2,input_cropped3]
+        real_center_key1 = torch.squeeze(real_center_key1).to(device)
+        real_center_key2 = torch.squeeze(real_center_key2).to(device)
+        real_center = torch.squeeze(real_center).to(device)
+        label = torch.squeeze(label).reshape(-1, 1).to(device)
+
         point_netG = point_netG.train()
         point_netD = point_netD.train()
         ############################
@@ -301,17 +324,19 @@ def train_epoch(point_netG, point_netD, trainLoader, epoch, alpha1, alpha2, crit
         optimizerG.step()
         end = time.time()
         b_time = end - start
-        print_log(f, '[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f / %.4f / %.4f/ %.4f, batch time: %.4f'
-            % (epoch, opt.niter, i, len(trainLoader),  
-                errD.data, errG_D.data,errG_l2,errG,CD_LOSS,b_time))
+        # print_log(f, '[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f / %.4f / %.4f/ %.4f, batch time: %.4f'
+        #     % (epoch, opt.niter, i, len(trainLoader),  
+        #         errD.data, errG_D.data,errG_l2,errG,CD_LOSS,b_time))
 
-        if i % 20 == 0:
-            if not os.path.exists(os.path.join(opt.save_dir, 'pcds')):
-                os.makedirs(os.path.join(opt.save_dir, 'pcds'))
+        if i % opt.img_freq == 0:
+            print_log(f, '[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f'
+                % (epoch, opt.niter, i, len(trainLoader), trainD_loss/(i+1), trainG_loss/(i+1)))
+            # if not os.path.exists(os.path.join(opt.save_dir, 'pcds')):
+            #     os.makedirs(os.path.join(opt.save_dir, 'pcds'))
             if not os.path.exists(os.path.join(opt.save_dir, 'imgs')):
                 os.makedirs(os.path.join(opt.save_dir, 'imgs'))
-            save_pcd(real_center[0].cpu().detach().numpy().reshape(-1, 3), '{}/train_{}_{}_real.pcd'.format(os.path.join(opt.save_dir, 'pcds'), epoch, i))
-            save_pcd(fake[0].cpu().detach().numpy().reshape(-1, 3), '{}/train_{}_{}_fake.pcd'.format(os.path.join(opt.save_dir, 'temp'), epoch, i))
+            # save_pcd(real_center[0].cpu().detach().numpy().reshape(-1, 3), '{}/train_{}_{}_real.pcd'.format(os.path.join(opt.save_dir, 'pcds'), epoch, i))
+            # save_pcd(fake[0].cpu().detach().numpy().reshape(-1, 3), '{}/train_{}_{}_fake.pcd'.format(os.path.join(opt.save_dir, 'temp'), epoch, i))
             plot_pcd_one_view(os.path.join(opt.save_dir, 'imgs', 'train_{}_{}.png'.format(epoch, i)),
                                 [real_center[0].cpu().detach().numpy().reshape(-1, 3), fake[0].cpu().detach().numpy().reshape(-1, 3)],
                                 ['real', 'fake'], xlim=[-1, 1], ylim=[-1, 1], zlim=[-1, 1])
@@ -327,25 +352,34 @@ def test_epoch(point_netG, testLoader, epoch, chamfer_loss, opt):
     label = torch.FloatTensor(opt.batchSize)
     start = time.time()
     test_loss = 0.0
-    rid = np.random.randint(0, len(testLoader))
     for i, data in enumerate(testLoader, 0):
 
-        _, _, _, input_cropped, _, _, real_center, _ = preprocess(data, label, opt)
+        input_cropped1, input_cropped2, input_cropped3, real_center_key1, real_center_key2, real_center, label = data
+        
+        input_cropped1 = torch.squeeze(input_cropped1).to(device)
+        input_cropped2 = torch.squeeze(input_cropped2).to(device)
+        input_cropped3 = torch.squeeze(input_cropped3).to(device)
+        input_cropped = [input_cropped1,input_cropped2,input_cropped3]
+        real_center_key1 = torch.squeeze(real_center_key1).to(device)
+        real_center_key2 = torch.squeeze(real_center_key2).to(device)
+        real_center = torch.squeeze(real_center).to(device)
+        label = torch.squeeze(label).reshape(-1, 1).to(device)
         
         point_netG.eval()
-        fake_center1,fake_center2,fake  =point_netG(input_cropped)
-        if rid == i:
-            if not os.path.exists(os.path.join(opt.save_dir, 'pcds')):
-                os.makedirs(os.path.join(opt.save_dir, 'pcds'))
+        fake_center1,fake_center2,fake = point_netG(input_cropped)
+        CD_loss = chamfer_loss(torch.squeeze(fake,1),torch.squeeze(real_center,1))
+        test_loss += CD_loss.item()
+
+        if i == 0:
+            # if not os.path.exists(os.path.join(opt.save_dir, 'pcds')):
+            #     os.makedirs(os.path.join(opt.save_dir, 'pcds'))
             if not os.path.exists(os.path.join(opt.save_dir, 'imgs')):
                 os.makedirs(os.path.join(opt.save_dir, 'imgs'))
-            save_pcd(real_center[0].cpu().detach().numpy().reshape(-1, 3), '{}/test_{}_real.pcd'.format(os.path.join(opt.save_dir, 'pcds'),epoch))
-            save_pcd(fake[0].cpu().detach().numpy().reshape(-1, 3), '{}/test_{}_fake.pcd'.format(os.path.join(opt.save_dir, 'temp'),epoch))
+            # save_pcd(real_center[0].cpu().detach().numpy().reshape(-1, 3), '{}/test_{}_real.pcd'.format(os.path.join(opt.save_dir, 'pcds'),epoch))
+            # save_pcd(fake[0].cpu().detach().numpy().reshape(-1, 3), '{}/test_{}_fake.pcd'.format(os.path.join(opt.save_dir, 'temp'),epoch))
             plot_pcd_one_view(os.path.join(opt.save_dir, 'imgs', 'test_{}.png'.format(epoch)),
                                 [real_center[0].cpu().detach().numpy().reshape(-1, 3), fake[0].cpu().detach().numpy().reshape(-1, 3)],
                                 ['real', 'fake'], xlim=[-1, 1], ylim=[-1, 1], zlim=[-1, 1])
-        CD_loss = chamfer_loss(torch.squeeze(fake,1),torch.squeeze(real_center,1))
-        test_loss += CD_loss.item()
     
     end = time.time()
     test_loss /= len(testLoader)
@@ -357,11 +391,19 @@ def test_epoch(point_netG, testLoader, epoch, chamfer_loss, opt):
 
 if __name__ == "__main__":
     opt = get_parser()
+    pre_ops(opt)
     f = open(os.path.join(opt.save_dir, 'loss_PFNet.txt'),'w')
     print_log(f, str(opt))
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     trainLoader, testLoader, trainDataset, testDataset = get_dataLoaders(f, opt)
+
+    # start = time.time()
+    # for i, data in tqdm(enumerate(trainLoader, 0)):
+    #     pass
+    # end = time.time()
+    # print_log(f, 'Time for loading data: %.4f' % (end-start))
+    
     point_netG, point_netD = get_models(opt)
 
     if torch.cuda.is_available():
@@ -376,8 +418,6 @@ if __name__ == "__main__":
     
     if opt.netD != '':
         point_netD = load_model(point_netD, opt.netD, f)
-
-    pre_ops(opt, f)
     
     # print(point_netG)
     print_log(f, "Total Number of Parameters in netG: {:.3f}M".format(count_parameters(point_netG)/1e6))
