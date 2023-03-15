@@ -148,10 +148,10 @@ def train(point_netG, point_netD, trainLoader, testLoader, trainDataset, testDat
     f=open(os.path.join(opt.save_dir, 'loss_PFNet.txt'),'a')
 
     # setup optimizer
-    optimizerD = torch.optim.Adam(point_netD.parameters(), lr=0.0001,betas=(0.9, 0.999),eps=1e-05,weight_decay=opt.weight_decay)
-    optimizerG = torch.optim.Adam(point_netG.parameters(), lr=0.0001,betas=(0.9, 0.999),eps=1e-05 ,weight_decay=opt.weight_decay)
-    schedulerD = torch.optim.lr_scheduler.StepLR(optimizerD, step_size=40, gamma=0.2)
-    schedulerG = torch.optim.lr_scheduler.StepLR(optimizerG, step_size=40, gamma=0.2)
+    optimizerD = torch.optim.Adam(point_netD.parameters(), lr=0.00005,betas=(0.9, 0.999),eps=1e-05,weight_decay=opt.weight_decay)
+    optimizerG = torch.optim.Adam(point_netG.parameters(), lr=0.002,betas=(0.9, 0.999),eps=1e-05 ,weight_decay=opt.weight_decay)
+    schedulerD = torch.optim.lr_scheduler.StepLR(optimizerD, step_size=10, gamma=0.5)
+    schedulerG = torch.optim.lr_scheduler.StepLR(optimizerG, step_size=10, gamma=0.5)
 
     best_loss = 1000000
     for epoch in range(0, opt.niter):
@@ -171,6 +171,8 @@ def train(point_netG, point_netD, trainLoader, testLoader, trainDataset, testDat
 
         schedulerD.step()
         schedulerG.step()
+        print_log("Learning Rate of G:" + str(schedulerG.get_lr()[0]))
+        print_log("Learning Rate of D:" + str(schedulerD.get_lr()[0]))
         
         torch.save({'epoch':epoch+1,
                     'loss': test_loss,

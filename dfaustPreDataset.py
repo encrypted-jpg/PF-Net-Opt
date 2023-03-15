@@ -21,8 +21,8 @@ class DFaustPreDataset(Dataset):
         self.opt = opt
         count = 1
         self.sdata = []
-        if "D-Faust" not in folder:
-            jfolder = os.path.join(folder, "D-Faust")
+        if "D-Faust_Pre" not in folder:
+            jfolder = os.path.join(folder, "D-Faust_Pre")
         with open(os.path.join(jfolder, jsonFile), 'r') as f:
             data = json.load(f)
         for name in tqdm(data[partition]):
