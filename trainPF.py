@@ -264,8 +264,8 @@ def train_epoch(point_netG, point_netD, trainLoader, epoch, alpha1, alpha2, crit
     
     trainG_loss = 0.0
     trainD_loss = 0.0
+    start = time.time()
     for i, data in enumerate(trainLoader, 0):
-        start = time.time()
         
         if opt.preprocess:
             cdata = preprocess(data)
@@ -322,15 +322,13 @@ def train_epoch(point_netG, point_netD, trainLoader, epoch, alpha1, alpha2, crit
         trainG_loss += errG.item()
         errG.backward()
         optimizerG.step()
-        end = time.time()
-        b_time = end - start
         # print_log(f, '[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f / %.4f / %.4f/ %.4f, batch time: %.4f'
         #     % (epoch, opt.niter, i, len(trainLoader),  
         #         errD.data, errG_D.data,errG_l2,errG,CD_LOSS,b_time))
 
         if i % opt.img_freq == 0:
-            print_log(f, '[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f'
-                % (epoch, opt.niter, i, len(trainLoader), trainD_loss/(i+1), trainG_loss/(i+1)))
+            print_log(f, '[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f Time Elapsed: %.4f'
+                % (epoch, opt.niter, i, len(trainLoader), trainD_loss/(i+1), trainG_loss/(i+1), time.time()-start))
             # if not os.path.exists(os.path.join(opt.save_dir, 'pcds')):
             #     os.makedirs(os.path.join(opt.save_dir, 'pcds'))
             if not os.path.exists(os.path.join(opt.save_dir, 'imgs')):
@@ -343,7 +341,8 @@ def train_epoch(point_netG, point_netD, trainLoader, epoch, alpha1, alpha2, crit
 
     trainG_loss /= len(trainLoader)
     trainD_loss /= len(trainLoader)
-    print_log(f, 'Epoch: %d, trainG_loss: %.4f, trainD_loss: %.4f' % (epoch, trainG_loss, trainD_loss))
+    print_log(f, 'Epoch: %d, trainG_loss: %.4f, trainD_loss: %.4f, Time Elapsed: %.4f'
+        % (epoch, trainG_loss, trainD_loss, time.time()-start))
     f.close()
     return trainG_loss, trainD_loss
 
