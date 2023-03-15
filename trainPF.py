@@ -171,8 +171,8 @@ def train(point_netG, point_netD, trainLoader, testLoader, trainDataset, testDat
 
         schedulerD.step()
         schedulerG.step()
-        print_log("Learning Rate of G:" + str(schedulerG.get_lr()[0]))
-        print_log("Learning Rate of D:" + str(schedulerD.get_lr()[0]))
+        print_log(f, "Learning Rate of G:" + str(schedulerG.get_lr()[0]))
+        print_log(f, "Learning Rate of D:" + str(schedulerD.get_lr()[0]))
         
         torch.save({'epoch':epoch+1,
                     'loss': test_loss,
