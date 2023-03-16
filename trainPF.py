@@ -15,10 +15,10 @@ from utils import distance_squre
 import data_utils as d_utils
 import ModelNet40Loader
 import shapenet_part_loader
-from model_PFNet import _netlocalD,_netG
-from model_PFPCN import _netlocalD,_netG_PCN
-from dfaustDataset import DFaustDataset
-from dfaustPreDataset import DFaustPreDataset
+from models.model_PFNet import _netlocalD,_netG
+from models.model_PFPCN import _netlocalD,_netG_PCN
+from datasets.dfaustDataset import DFaustDataset
+from datasets.dfaustPreDataset import DFaustPreDataset
 from torch.utils.data import DataLoader
 import numpy as np
 import open3d as o3d
